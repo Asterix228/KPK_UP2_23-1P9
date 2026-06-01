@@ -46,18 +46,19 @@ class Subgroup(BaseModel):
 class SubgroupStudent(BaseModel):
     """Транзитивная таблица: связь многие ко многим между Subgroup и Student.
     student_id — внешний ID из Profile Service, не хранится локально.
-    Ограничение уникальности (student_id, division_type) реализуется на уровне
-    бизнес-логики: перед добавлением проверяется, не состоит ли студент уже
-    в другой подгруппе с тем же division_type."""
+    division_type дублируется из Subgroup для реализации уникального индекса
+    (student_id, division_type) на уровне БД."""
     id = AutoField(primary_key=True)
     subgroup = ForeignKeyField(Subgroup, backref='subgroup_students', on_delete='CASCADE')
     student_id = IntegerField()
+    division_type = CharField(max_length=100)
     joined_at = DateTimeField(default=datetime.now)
 
     class Meta:
         table_name = 'subgroup_students'
         indexes = (
-            (('subgroup', 'student_id'), True),  # студент в одной подгруппе только один раз
+            (('subgroup', 'student_id'), True),       # студент в одной подгруппе только один раз
+            (('student_id', 'division_type'), True),  # студент только в одной подгруппе по типу деления
         )
 
 
@@ -80,9 +81,9 @@ def init_db():
             purpose='Английский язык — группа B'
         )
 
-        SubgroupStudent.create(subgroup=sg1, student_id=1)
-        SubgroupStudent.create(subgroup=sg1, student_id=2)
-        SubgroupStudent.create(subgroup=sg2, student_id=3)
+        SubgroupStudent.create(subgroup=sg1, student_id=1, division_type='Иностранный язык')
+        SubgroupStudent.create(subgroup=sg1, student_id=2, division_type='Иностранный язык')
+        SubgroupStudent.create(subgroup=sg2, student_id=3, division_type='Иностранный язык')
 
 
 if __name__ == '__main__':
