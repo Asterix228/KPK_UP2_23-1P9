@@ -1,124 +1,92 @@
+from datetime import datetime
+from peewee import (
+    SqliteDatabase, Model, AutoField, CharField, IntegerField,
+    ForeignKeyField, DateTimeField, BooleanField, Check
+)
 
-## Файл `models.py` (модели БД + инициализация)
-"""
-Модуль моделей для Subgroup Service (Вариант 8)
-Использует peewee ORM + SQLite3
-"""
+db = SqliteDatabase('subgroup.db')
 
-from peewee import *
-from datetime import date
-
-# Инициализация базы данных
-db = SqliteDatabase('subgroup_service.db')
 
 class BaseModel(Model):
-    """Базовый класс для всех моделей"""
     class Meta:
         database = db
 
+
 class Group(BaseModel):
-    """Модель группы (смежный справочник, внешний ключ)"""
+    """Внешняя сущность: учебная группа (заглушка, управляется Group Service)"""
     id = AutoField(primary_key=True)
-    name = CharField(max_length=50, unique=True, null=False)
-    formation_year = IntegerField(null=False)
-    status = CharField(max_length=20, null=False, default='active')
-    
+    name = CharField(max_length=50, unique=True)
+
     class Meta:
         table_name = 'groups'
 
+
 class Student(BaseModel):
-    """Модель студента (смежный справочник, внешний ключ)"""
+    """Внешняя сущность: студент (заглушка, управляется Profile Service)"""
     id = AutoField(primary_key=True)
-    first_name = CharField(max_length=50, null=False)
-    last_name = CharField(max_length=50, null=False)
-    email = CharField(max_length=100, unique=True, null=False)
-    
+    full_name = CharField(max_length=150)
+    group = ForeignKeyField(Group, backref='students', on_delete='RESTRICT')
+
     class Meta:
         table_name = 'students'
 
+
 class Subgroup(BaseModel):
-    """
-    Модель подгруппы
-    Не содержит NULL-внешних ключей
-    """
     id = AutoField(primary_key=True)
-    group_id = ForeignKeyField(Group, backref='subgroups', 
-                                on_delete='CASCADE', null=False)
-    name = CharField(max_length=100, null=False)
-    type = CharField(max_length=20, null=False)
-    max_students = IntegerField(null=False, default=30)
-    created_at = DateField(null=False, default=date.today)
-    
-    # Ограничения
+    name = CharField(max_length=100, constraints=[Check("length(name) >= 1")])
+    group = ForeignKeyField(Group, backref='subgroups', on_delete='RESTRICT')
+    purpose = CharField(max_length=200, null=True)
+    is_active = BooleanField(default=True)
+    created_at = DateTimeField(default=datetime.now)
+    updated_at = DateTimeField(default=datetime.now)
+
     class Meta:
         table_name = 'subgroups'
-        constraints = [
-            Check('type IN ("лекционная", "практическая", "лабораторная")'),
-            Check('max_students BETWEEN 1 AND 500')
-        ]
+        indexes = (
+            (('name', 'group'), True),  # уникальная комбинация name + group_id
+        )
+
+    def save(self, *args, **kwargs):
+        self.updated_at = datetime.now()
+        return super().save(*args, **kwargs)
+
 
 class SubgroupStudent(BaseModel):
-    """
-    Транзитивная таблица для связи многие-ко-многим
-    Между подгруппами и студентами
-    """
+    """Транзитивная таблица: связь многие ко многим между Subgroup и Student"""
     id = AutoField(primary_key=True)
-    subgroup_id = ForeignKeyField(Subgroup, backref='members',
-                                   on_delete='CASCADE', null=False)
-    student_id = ForeignKeyField(Student, backref='subgroups',
-                                  on_delete='CASCADE', null=False)
-    joined_at = DateField(null=False, default=date.today)
-    
+    subgroup = ForeignKeyField(Subgroup, backref='subgroup_students', on_delete='CASCADE')
+    student = ForeignKeyField(Student, backref='subgroup_students', on_delete='CASCADE')
+    joined_at = DateTimeField(default=datetime.now)
+
     class Meta:
         table_name = 'subgroup_students'
-        # Уникальность: студент не может быть дважды в одной подгруппе
         indexes = (
-            (('subgroup_id', 'student_id'), True),
+            (('subgroup', 'student'), True),  # студент может быть в подгруппе только один раз
         )
+
 
 def init_db():
-    """
-    Функция инициализации БД.
-    Создаёт все таблицы, если они ещё не созданы.
-    """
+    """Создание таблиц и заполнение начальными данными"""
     db.connect()
-    # Создаём таблицы (если их нет)
-    db.create_tables([Group, Student, Subgroup, SubgroupStudent])
-    
-    # Заполнение тестовыми данными (только если таблицы пустые)
-    if Group.select().count() == 0:
-        # Добавляем тестовую группу
-        test_group = Group.create(
-            name='П-41', 
-            formation_year=2024, 
-            status='active'
-        )
-        
-        # Добавляем тестовых студентов
-        students = []
-        for i in range(1, 6):
-            s = Student.create(
-                first_name=f'Студент{i}',
-                last_name='Тестов',
-                email=f'test{i}@example.com'
-            )
-            students.append(s)
-        
-        # Добавляем тестовую подгруппу
-        sub = Subgroup.create(
-            group_id=test_group,
-            name='Подгруппа А',
-            type='практическая',
-            max_students=10
-        )
-        
-        # Связываем студентов с подгруппой
-        for student in students:
-            SubgroupStudent.create(subgroup_id=sub, student_id=student)
-    
-    db.close()
-    print("База данных инициализирована (таблицы созданы)")
+    db.create_tables([Group, Student, Subgroup, SubgroupStudent], safe=True)
 
-# Точка входа для вызова инициализации
+    if not Group.select().exists():
+        g1 = Group.create(name='ИС-21')
+        g2 = Group.create(name='ПО-22')
+
+        s1 = Student.create(full_name='Иванов Иван Иванович', group=g1)
+        s2 = Student.create(full_name='Петрова Мария Сергеевна', group=g1)
+        s3 = Student.create(full_name='Сидоров Алексей Петрович', group=g1)
+        s4 = Student.create(full_name='Кузнецова Анна Дмитриевна', group=g2)
+
+        sg1 = Subgroup.create(name='Подгруппа 1', group=g1, purpose='Иностранный язык')
+        sg2 = Subgroup.create(name='Подгруппа 2', group=g1, purpose='Иностранный язык')
+
+        SubgroupStudent.create(subgroup=sg1, student=s1)
+        SubgroupStudent.create(subgroup=sg1, student=s2)
+        SubgroupStudent.create(subgroup=sg2, student=s3)
+
+
 if __name__ == '__main__':
     init_db()
+    print("База данных subgroup.db успешно инициализирована.")
